@@ -37,7 +37,7 @@ Replace `public/Hitesh_A_Resume.pdf` to update the résumé download.
 | Atmosphere | Physically based Preetham sky with animated clouds, stars & moon at night, sky-derived image-based lighting, distant mountain ranges with aerial perspective, N8AO ambient occlusion, bloom, sharpening |
 | Audio | 100% generated with Web Audio: ambient music, wind, birds, crickets, water, fire crackle, footsteps, UI chimes |
 | Foliage | Leaf atlases get coverage-preserving mipmaps, so canopies stay full at any distance instead of thinning out into bare trunks |
-| Performance | Lazy-loaded 3D engine, background shader compilation, lazily generated grass, BatchedMesh foliage, adaptive resolution scaling before quality steps, GPU/memory-aware defaults, WebGL context-loss recovery, retrying model loads |
+| Performance | Lazy-loaded 3D engine, background shader compilation, lazily generated grass, BatchedMesh foliage, two-sided adaptive quality (steps down under 30 fps, climbs back above 52 with hysteresis so quality never ratchets away), GPU/memory-aware defaults, WebGL context-loss recovery, retrying model loads |
 | Accessibility & SEO | Classic HTML view, keyboard controls, reduced-motion support, noscript fallback, Open Graph image, JSON-LD |
 
 ### World map
@@ -52,7 +52,7 @@ time of day. The world itself opens in the morning.
 
 ### Your photo
 
-Drop a headshot at `public/profile.jpg` and it appears in three places: on the loading screen (fading
+Drop a headshot at `public/profile.jpg` (`.png`, `.jpeg` and `.webp` work too) and it appears in three places: on the loading screen (fading
 and scaling in, then flying up into the top bar when you enter), as the profile picture in the top bar,
 and at the top of the classic portfolio page. Without that file everything falls back to the "HA"
 monogram, so the site works either way. A square-ish crop of about 800x800 and under ~200 KB is plenty.

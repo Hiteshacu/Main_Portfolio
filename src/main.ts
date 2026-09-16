@@ -38,7 +38,7 @@ async function boot() {
     onDiscover: (zone, n, total) => ui.onDiscover(zone, n, total),
     onZone: (zone) => ui.onZone(zone),
     onFirstMove: () => ui.onFirstMove(),
-    onQualityChange: (level) => ui.onQualityChange(level),
+    onQualityChange: (level, reason) => ui.onQualityChange(level, reason),
     onKey: (code) => ui.onKey(code),
     onCombatState: (s) => ui.onCombatState(s),
     onPlayerHealth: (hp, max) => ui.onPlayerHealth(hp, max),

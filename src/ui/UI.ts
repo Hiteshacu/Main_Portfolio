@@ -45,17 +45,24 @@ export class UI {
 
   /** Marks the UI as having a real photo once it loads (otherwise the monogram stays). */
   private bindPortrait() {
+    const base = import.meta.env.BASE_URL;
+    // Whatever the photo was saved as, one of these will load (or none, and the monogram stays).
+    const candidates = [`${base}profile.jpg`, `${base}profile.jpeg`, `${base}profile.png`, `${base}profile.webp`];
     const imgs = [...this.root.querySelectorAll<HTMLImageElement>('.portrait-img, .brand-mark img, .hero-portrait')];
-    let pending = imgs.length;
-    const done = (ok: boolean) => {
-      if (ok) this.root.classList.add('has-portrait');
-      if (--pending === 0 && !this.root.classList.contains('has-portrait')) this.root.classList.add('no-portrait');
-    };
     for (const img of imgs) {
-      if (img.complete) done(img.naturalWidth > 0);
-      else {
-        img.addEventListener('load', () => done(true));
-        img.addEventListener('error', () => done(false));
+      if (img.dataset.bound) continue;
+      img.dataset.bound = '1';
+      let attempt = 0;
+      const ok = () => this.root.classList.add('has-portrait');
+      const next = () => {
+        attempt++;
+        if (attempt < candidates.length) img.src = candidates[attempt];
+      };
+      img.addEventListener('load', ok);
+      img.addEventListener('error', next);
+      if (img.complete) {
+        if (img.naturalWidth > 0) ok();
+        else next();
       }
     }
   }
@@ -656,8 +663,9 @@ export class UI {
     $('.safe-badge', this.root).hidden = !state.safe;
   }
 
-  onQualityChange(level: QualityLevel) {
-    this.toast('Graphics adjusted', `Switched to ${level} quality for smoother performance.`, '#9fb8ff');
+  onQualityChange(level: QualityLevel, reason: 'lower' | 'restore' = 'lower') {
+    if (reason === 'restore') this.toast('Graphics restored', `Back to ${level} quality — this device has room to spare.`, '#9fe0b8');
+    else this.toast('Graphics adjusted', `Switched to ${level} quality for smoother performance.`, '#9fb8ff');
     this.syncQuality();
     this.syncUiWeight(level);
   }

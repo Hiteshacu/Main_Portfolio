@@ -48,7 +48,7 @@ export interface ExperienceEvents extends CombatEvents {
   onDiscover: (zone: ZoneDef, discovered: number, total: number) => void;
   onZone: (zone: ZoneDef | null) => void;
   onFirstMove: () => void;
-  onQualityChange: (level: QualityLevel) => void;
+  onQualityChange: (level: QualityLevel, reason: 'lower' | 'restore') => void;
   onKey: (code: string) => void;
   /** The browser/GPU dropped the WebGL context (driver reset, out of GPU memory...). */
   onContextLost: () => void;
@@ -57,6 +57,12 @@ export interface ExperienceEvents extends CombatEvents {
 }
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+// Adaptive quality thresholds. Below STRUGGLING the world steps down; it only steps back up once it
+// is comfortably above COMFORTABLE. The gap between them is deliberate: without it, a device sitting
+// near the line slowly loses quality over a session and never gets it back.
+const STRUGGLING_FPS = 30;
+const COMFORTABLE_FPS = 52;
 
 export class Experience {
   readonly renderer: THREE.WebGLRenderer;
@@ -123,6 +129,10 @@ export class Experience {
   private raf = 0;
   /** Dynamic resolution: scales the pixel ratio down on slow GPUs before dropping a quality tier. */
   private renderScale = 1;
+  /** Best tier this device is allowed back up to (what it was detected/asked for). */
+  private ceiling: QualityLevel = 'high';
+  private downgrades = 0;
+  private goodWindows = 0;
   private frameErrors = 0;
   private lastError = '';
   private stopped = false;
@@ -172,6 +182,7 @@ export class Experience {
 
   async load(quality: QualityLevel) {
     this.quality = quality;
+    this.ceiling = quality;
     const step = async (p: number, label: string) => {
       this.events.onProgress(p, label);
       await nextFrame();
@@ -393,6 +404,7 @@ export class Experience {
         console.warn('Map render skipped', err);
       }
       this.resolveMap(map);
+      this.pausePerfWatch(2);
     };
     const idle = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
     if (idle) idle(run, { timeout: 4000 });
@@ -591,6 +603,7 @@ export class Experience {
   /** Full-resolution render of one patch of the world, for the zoomed travel map. */
   mapDetail(centerX: number, centerZ: number, half: number) {
     if (this.stopped || this.renderer.getContext().isContextLost()) return null;
+    this.pausePerfWatch(2);
     try {
       return this.bakeMap(this.quality === 'low' ? 768 : 1024, centerX, centerZ, half);
     } catch (err) {
@@ -668,13 +681,17 @@ export class Experience {
 
   setQuality(level: QualityLevel | 'auto') {
     this.renderScale = 1;
+    this.downgrades = 0;
+    this.goodWindows = 0;
     if (level === 'auto') {
       this.autoQuality = true;
       this.frameTimes = [];
       this.applyQuality(this.quality);
       return;
     }
+    // A chosen level is also the ceiling auto mode may climb back to later.
     this.autoQuality = false;
+    this.ceiling = level;
     this.applyQuality(level);
   }
 
@@ -740,6 +757,7 @@ export class Experience {
   }
 
   teleportToZone(id: ZoneId) {
+    this.pausePerfWatch(3);
     const zn = zoneById[id];
     const x = zn.x + zn.arrive[0];
     const z = zn.z + zn.arrive[1];
@@ -815,6 +833,8 @@ export class Experience {
     this.lastTime = now;
     if (this.paused) {
       this.input.endFrame();
+      // Coming back from a menu should not count as a slow frame.
+      this.pausePerfWatch(1.5);
       return;
     }
     const dt = clamp(rawDt, 0, 1 / 20);
@@ -849,6 +869,7 @@ export class Experience {
 
   /** Battle on: enemies, weapon, crosshair and mouse-lock aiming. Off: pure exploration. */
   setBattle(on: boolean, notify = true) {
+    this.pausePerfWatch(3);
     this.battle = on;
     this.combat.setEnabled(on);
     this.input.battleMode = on;
@@ -1130,29 +1151,59 @@ export class Experience {
     if (this.frameTimes.length < 120) return;
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
     this.frameTimes = [];
-    // Median frame time ignores one-off spikes (GC, chunk building).
+    // Median frame time ignores one-off spikes (GC, chunk building, a map render).
     const fps = 1 / sorted[Math.floor(sorted.length / 2)];
-    if (fps < 42) {
-      if (this.renderScale > 0.72) {
-        this.renderScale = Math.max(0.7, this.renderScale - 0.12);
+    const order: QualityLevel[] = ['low', 'medium', 'high'];
+    const index = order.indexOf(this.quality);
+
+    if (fps < STRUGGLING_FPS) {
+      this.goodWindows = 0;
+      if (this.renderScale > 0.73) {
+        this.renderScale = Math.max(0.72, this.renderScale - 0.1);
         this.applyPixelRatio();
         this.resize();
-        this.qualityCheckAt = this.elapsed + 1.5;
-      } else if (this.quality !== 'low') {
-        const next: QualityLevel = this.quality === 'high' ? 'medium' : 'low';
-        this.renderScale = 0.85;
-        this.applyQuality(next);
-        this.events.onQualityChange(next);
-        this.qualityCheckAt = this.elapsed + 2.5;
+      } else if (index > 0) {
+        this.downgrades++;
+        // Repeatedly failing at a tier means this device simply cannot hold it — stop climbing back.
+        if (this.downgrades >= 3) this.ceiling = order[index - 1];
+        this.applyQuality(order[index - 1]);
+        this.events.onQualityChange(order[index - 1], 'lower');
       }
-    } else if (fps > 58 && this.renderScale < 1) {
-      this.renderScale = Math.min(1, this.renderScale + 0.08);
+      this.qualityCheckAt = this.elapsed + 3;
+      return;
+    }
+
+    if (fps < COMFORTABLE_FPS) {
+      // In the band between the two thresholds nothing changes — this hysteresis is what stops
+      // the world from slowly sliding down a notch at a time over a long session.
+      this.goodWindows = 0;
+      return;
+    }
+
+    // Comfortably fast: give back what was taken away, quality tier first (it is the visible part),
+    // and wait longer before each successive attempt so we never oscillate.
+    this.goodWindows++;
+    const needed = 3 + this.downgrades * 3;
+    if (this.goodWindows < needed) return;
+    this.goodWindows = 0;
+    if (index < order.indexOf(this.ceiling)) {
+      this.applyQuality(order[index + 1]);
+      this.events.onQualityChange(order[index + 1], 'restore');
+      this.qualityCheckAt = this.elapsed + 6;
+    } else if (this.renderScale < 1) {
+      this.renderScale = Math.min(1, this.renderScale + 0.09);
       this.applyPixelRatio();
       this.resize();
-      this.qualityCheckAt = this.elapsed + 6;
-    } else if (fps > 57) {
+      this.qualityCheckAt = this.elapsed + 4;
+    } else {
       this.qualityCheckAt = this.elapsed + 20;
     }
+  }
+
+  /** Ignore frame times for a moment (after a teleport, a map render, leaving a menu…). */
+  private pausePerfWatch(seconds = 2) {
+    this.frameTimes = [];
+    this.qualityCheckAt = Math.max(this.qualityCheckAt, this.elapsed + seconds);
   }
 
   dispose() {

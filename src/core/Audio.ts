@@ -35,7 +35,7 @@ export class AudioEngine {
     window.addEventListener('pointerdown', retry, { passive: true });
     window.addEventListener('keydown', retry);
   }
-  private volume = 0.8;
+  private volume = 0.9;
   private nextBird = 0;
   private nextCricket = 0;
   private nextChord = 0;
@@ -99,14 +99,14 @@ export class AudioEngine {
     this.reverb.connect(reverbGain).connect(this.master);
 
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = 0.32;
+    this.musicBus.gain.value = 0.85;
     this.musicBus.connect(this.master);
     this.musicBus.connect(this.reverb);
     this.sfxBus = ctx.createGain();
-    this.sfxBus.gain.value = 0.7;
+    this.sfxBus.gain.value = 0.85;
     this.sfxBus.connect(this.master);
     this.ambBus = ctx.createGain();
-    this.ambBus.gain.value = 0.8;
+    this.ambBus.gain.value = 0.95;
     this.ambBus.connect(this.master);
 
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
@@ -125,7 +125,7 @@ export class AudioEngine {
     this.windFilter.frequency.value = 480;
     this.windFilter.Q.value = 0.6;
     this.windGain = ctx.createGain();
-    this.windGain.gain.value = 0.18;
+    this.windGain.gain.value = 0.3;
     wind.connect(this.windFilter).connect(this.windGain).connect(this.ambBus);
 
     // Water lapping
@@ -256,7 +256,7 @@ export class AudioEngine {
     const pan = ctx.createStereoPanner();
     pan.pan.value = Math.random() * 1.6 - 0.8;
     const out = ctx.createGain();
-    out.gain.value = (0.05 + Math.random() * 0.05) * (1 - this.night);
+    out.gain.value = (0.12 + Math.random() * 0.1) * (1 - this.night);
     out.connect(pan).connect(this.ambBus);
     pan.connect(this.reverb);
     const base = 2200 + Math.random() * 1800;
@@ -285,7 +285,7 @@ export class AudioEngine {
     const pan = ctx.createStereoPanner();
     pan.pan.value = Math.random() * 2 - 1;
     const out = ctx.createGain();
-    out.gain.value = 0.018 * this.night;
+    out.gain.value = 0.05 * this.night;
     out.connect(pan).connect(this.ambBus);
     const f = 4200 + Math.random() * 900;
     for (let i = 0; i < 3; i++) {
@@ -526,23 +526,23 @@ export class AudioEngine {
     this.night = opts.night;
     this.fireProximity = opts.fireProximity;
 
-    this.windGain.gain.setTargetAtTime(0.12 + opts.wind * 0.12, now, 0.5);
+    this.windGain.gain.setTargetAtTime(0.22 + opts.wind * 0.2, now, 0.5);
     this.windFilter.frequency.setTargetAtTime(380 + Math.sin(now * 0.13) * 160 + Math.sin(now * 0.41) * 90, now, 0.4);
-    this.waterGain.gain.setTargetAtTime(opts.waterProximity * 0.5, now, 0.3);
-    this.fireGain.gain.setTargetAtTime(opts.fireProximity * 0.22, now, 0.3);
+    this.waterGain.gain.setTargetAtTime(opts.waterProximity * 0.85, now, 0.3);
+    this.fireGain.gain.setTargetAtTime(opts.fireProximity * 0.4, now, 0.3);
 
     const horizon = now + 0.2;
     if (this.nextChord < horizon) {
       const chord = CHORDS[this.chordIndex % CHORDS.length];
       const dur = 9.5;
-      chord.forEach((m, i) => this.pad(mtof(m), this.nextChord + i * 0.05, dur, i === 0 ? 0.05 : 0.03));
+      chord.forEach((m, i) => this.pad(mtof(m), this.nextChord + i * 0.05, dur, i === 0 ? 0.16 : 0.1));
       this.chordIndex++;
       this.nextChord += 8;
     }
     if (this.nextNote < horizon) {
       const root = CHORDS[(this.chordIndex + CHORDS.length - 1) % CHORDS.length][0] + 24;
       const m = root + PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)] + (Math.random() > 0.7 ? 12 : 0);
-      this.pluck(mtof(m), this.nextNote, 0.06);
+      this.pluck(mtof(m), this.nextNote, 0.17);
       this.nextNote += [0.8, 1.2, 1.6, 2.4, 3.2][Math.floor(Math.random() * 5)];
     }
     if (this.nextBird < horizon) {

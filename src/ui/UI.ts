@@ -39,7 +39,50 @@ export class UI {
   constructor(private root: HTMLElement) {
     root.innerHTML = this.template();
     this.classic = new ClassicView($('#classic'), () => this.closeClassic());
+    this.bindPortrait();
     this.bindStatic();
+  }
+
+  /** Marks the UI as having a real photo once it loads (otherwise the monogram stays). */
+  private bindPortrait() {
+    const imgs = [...this.root.querySelectorAll<HTMLImageElement>('.portrait-img, .brand-mark img, .hero-portrait')];
+    let pending = imgs.length;
+    const done = (ok: boolean) => {
+      if (ok) this.root.classList.add('has-portrait');
+      if (--pending === 0 && !this.root.classList.contains('has-portrait')) this.root.classList.add('no-portrait');
+    };
+    for (const img of imgs) {
+      if (img.complete) done(img.naturalWidth > 0);
+      else {
+        img.addEventListener('load', () => done(true));
+        img.addEventListener('error', () => done(false));
+      }
+    }
+  }
+
+  /** The loading portrait flies up into the top bar and becomes the profile picture. */
+  private flyPortraitToBrand() {
+    if (!this.root.classList.contains('has-portrait') || reducedMotion) return;
+    const from = this.root.querySelector<HTMLElement>('.portrait');
+    const to = this.root.querySelector<HTMLElement>('.brand-mark');
+    if (!from || !to) return;
+    const a = from.getBoundingClientRect();
+    const b = to.getBoundingClientRect();
+    if (!a.width || !b.width) return;
+    const clone = from.cloneNode(true) as HTMLElement;
+    clone.classList.add('portrait-fly');
+    Object.assign(clone.style, { left: `${a.left}px`, top: `${a.top}px`, width: `${a.width}px`, height: `${a.height}px` });
+    document.body.appendChild(clone);
+    gsap.to(clone, {
+      left: b.left,
+      top: b.top,
+      width: b.width,
+      height: b.height,
+      borderRadius: 12,
+      duration: 0.9,
+      ease: 'power3.inOut',
+      onComplete: () => clone.remove(),
+    });
   }
 
   // ------------------------------------------------------------------ template
@@ -52,11 +95,14 @@ export class UI {
     <section id="loader" class="loader" aria-live="polite">
       <div class="loader-bg"></div>
       <div class="loader-inner">
-        <svg class="monogram" viewBox="0 0 120 120" aria-hidden="true">
-          <circle cx="60" cy="60" r="54" class="mono-ring"/>
-          <path d="M36 34v52M36 60h26M62 34v52" class="mono-stroke"/>
-          <path d="M70 86 84 34l14 52M75 68h18" class="mono-stroke delay"/>
-        </svg>
+        <div class="portrait" aria-hidden="true">
+          <img class="portrait-img" src="${import.meta.env.BASE_URL}profile.jpg" alt="" />
+          <svg class="monogram" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="54" class="mono-ring"/>
+            <path d="M36 34v52M36 60h26M62 34v52" class="mono-stroke"/>
+            <path d="M70 86 84 34l14 52M75 68h18" class="mono-stroke delay"/>
+          </svg>
+        </div>
         <p class="eyebrow loader-eyebrow">Portfolio world</p>
         <h1 class="loader-title">${profile.name}</h1>
         <p class="loader-role">${profile.role}</p>
@@ -66,17 +112,17 @@ export class UI {
         </div>
         <p class="loader-status"><span class="status-text">Preparing the world</span> <span class="status-pct">0%</span></p>
         <div class="enter" hidden>
-          <button class="btn btn-primary btn-lg" data-enter="audio">${icons.sound} Enter the world</button>
-          <button class="btn btn-ghost btn-lg" data-enter="silent">${icons.mute} Enter without audio</button>
+          <button class="btn btn-primary btn-lg" data-enter="audio">${icons.sound} Enter the 3D world</button>
+          <button class="btn btn-ghost btn-lg" data-classic>${icons.book} Professional Portfolio</button>
         </div>
-        <button class="skip link" data-classic>Skip to classic portfolio ${icons.arrowRight}</button>
+        <button class="skip link" data-enter="silent">${icons.mute} Enter the 3D world without sound</button>
         <p class="loader-hint">${isTouch ? 'Tip: use the joystick to walk and drag to look around' : 'Best experienced with headphones · WASD to walk · drag to look'}</p>
       </div>
     </section>
 
     <header id="topbar" class="topbar" hidden>
       <button class="brand" data-travel="welcome" aria-label="Travel home">
-        <span class="brand-mark">HA</span>
+        <span class="brand-mark"><img src="${import.meta.env.BASE_URL}profile.jpg" alt="" /><b>HA</b></span>
         <span class="brand-text"><strong>${profile.name}</strong><small>AI &amp; Security Engineer</small></span>
       </button>
       <nav class="nav" aria-label="Portfolio sections">${nav}</nav>
@@ -219,7 +265,7 @@ export class UI {
         </div>
         <div class="setting row">
           <label for="vol">Volume</label>
-          <input id="vol" type="range" min="0" max="1" step="0.05" value="0.8" />
+          <input id="vol" type="range" min="0" max="1" step="0.05" value="0.9" />
         </div>
         <div class="setting row">
           <label>Battle</label>
@@ -325,6 +371,7 @@ export class UI {
     this.map.setDiscovered(this.exp.discovered);
     this.map.mountBig($('.bigmap', this.root), (id) => this.travel(id));
     this.exp.mapImage.then((canvas) => canvas && this.map.setImage(canvas));
+    this.map.setDetailProvider((cx, cz, half) => this.exp.mapDetail(cx, cz, half));
     this.syncUiWeight(this.exp.quality);
     // Lay out and paint the modals once while the loading screen is still up: their first paint is
     // otherwise a ~100 ms hitch the first time the map or settings is opened.
@@ -439,6 +486,7 @@ export class UI {
     const hud = $('#hud', this.root);
     top.hidden = false;
     hud.hidden = false;
+    this.flyPortraitToBrand();
     if (!reducedMotion) {
       gsap.from(top, { y: -40, opacity: 0, duration: 0.9, ease: 'power3.out' });
       gsap.from(top.querySelectorAll('.nav-link, .top-actions > *'), { y: -10, opacity: 0, stagger: 0.04, duration: 0.5, delay: 0.2 });
@@ -849,6 +897,7 @@ export class UI {
   openClassic() {
     const el = $('#classic', this.root);
     if (!el.hidden) return;
+    this.bindPortrait();
     this.closeModals();
     this.closePanel();
     el.hidden = false;

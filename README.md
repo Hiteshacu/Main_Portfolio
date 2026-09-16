@@ -46,7 +46,16 @@ The map is a real render of the world, not a drawing: after the shaders compile,
 once from straight above with an orthographic camera (trees, buildings, water, shadows), tone-mapped to a
 canvas and given topographic contour lines. The minimap and the travel map both draw from that image;
 the travel map can be zoomed (wheel / pinch / buttons) and panned, with a compass, a metric scale bar and
-live enemy markers.
+live enemy markers. Zooming in re-renders the visible patch at full resolution rather than magnifying the
+overview, so the map stays sharp, and map renders always use a fixed high sun so they read the same at any
+time of day. The world itself opens in the morning.
+
+### Your photo
+
+Drop a headshot at `public/profile.jpg` and it appears in three places: on the loading screen (fading
+and scaling in, then flying up into the top bar when you enter), as the profile picture in the top bar,
+and at the top of the classic portfolio page. Without that file everything falls back to the "HA"
+monogram, so the site works either way. A square-ish crop of about 800x800 and under ~200 KB is plenty.
 
 ### Browser notes
 

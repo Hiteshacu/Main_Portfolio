@@ -38,12 +38,13 @@ interface Preset {
 }
 
 const PRESETS: Record<TimeOfDay, Preset> = {
+  // Golden morning: warm and directional, but high enough that the valley is not all long shadow.
   morning: {
-    sunElev: 17, skyElev: 7, sunAzim: 70, sunColor: '#ffd6a8', sunIntensity: 3.1,
-    hemiSky: '#bcd2ea', hemiGround: '#6d5b3c', hemiIntensity: 0.9,
-    fog: '#d8d2c6', fogDensity: 0.0032, skyHorizon: '#e9d6bd',
+    sunElev: 31, skyElev: 17, sunAzim: 110, sunColor: '#ffdcb4', sunIntensity: 3.4,
+    hemiSky: '#c8dcf2', hemiGround: '#7a6746', hemiIntensity: 1.1,
+    fog: '#dcd6c8', fogDensity: 0.0029, skyHorizon: '#edd9bd',
     waterShallow: '#6fc6b6', waterDeep: '#276a78',
-    turbidity: 6, rayleigh: 2.2, mie: 0.006, mieG: 0.83, clouds: 0.45, exposure: 0.55, envIntensity: 0.9, night: 0, bloom: 0.28,
+    turbidity: 5, rayleigh: 2, mie: 0.005, mieG: 0.82, clouds: 0.42, exposure: 0.52, envIntensity: 0.95, night: 0, bloom: 0.26,
   },
   day: {
     sunElev: 46, skyElev: 46, sunAzim: 135, sunColor: '#fff4e2', sunIntensity: 3.6,
@@ -104,7 +105,7 @@ export class Environment {
   readonly sunDir = new THREE.Vector3();
   readonly skySunDir = new THREE.Vector3();
   state: LiveState;
-  time: TimeOfDay = 'day';
+  time: TimeOfDay = 'morning';
   /** Called when a time-of-day transition finishes (used to refresh the environment map). */
   onSettled?: () => void;
   private skyExposure = { value: 0.42 };
@@ -122,7 +123,7 @@ export class Environment {
   envTexture: THREE.Texture | null = null;
 
   constructor(scene: THREE.Scene) {
-    this.state = toLive(PRESETS.day);
+    this.state = toLive(PRESETS.morning);
 
     this.sun = new THREE.DirectionalLight('#fff', 3);
     this.sun.castShadow = true;

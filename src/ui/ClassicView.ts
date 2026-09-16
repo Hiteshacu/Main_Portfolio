@@ -38,6 +38,7 @@ export class ClassicView {
 
         <section class="classic-hero" id="classic-top">
           <div class="hero-glow"></div>
+          <img class="hero-portrait" src="${import.meta.env.BASE_URL}profile.jpg" alt="${profile.name}" />
           <p class="eyebrow">${profile.location}</p>
           <h1><span>${profile.name}</span></h1>
           <p class="hero-role">${profile.role}</p>

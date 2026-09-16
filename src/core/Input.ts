@@ -28,8 +28,8 @@ export class Input {
   onLockChange?: (locked: boolean) => void;
   mouseFiring = false;
   touchFiring = false;
-  /** A click can start and end inside one frame — this makes sure it still fires a shot. */
-  private firePulse = false;
+  /** A click can start and end inside one frame — this keeps it "held" until a shot goes off. */
+  private firePulseUntil = 0;
   /** Right mouse held (or touch scope toggle) → look through the rifle scope. */
   mouseScoping = false;
   touchScoping = false;
@@ -95,7 +95,7 @@ export class Input {
   }
 
   get firing() {
-    return this.enabled && this.battleMode && (this.mouseFiring || this.firePulse || this.touchFiring || this.keys.has('KeyF'));
+    return this.enabled && this.battleMode && (this.mouseFiring || performance.now() < this.firePulseUntil || this.touchFiring || this.keys.has('KeyF'));
   }
 
   private keydown = (e: KeyboardEvent) => {
@@ -116,11 +116,17 @@ export class Input {
         // The click that grabs the mouse also fires, so shooting never feels unresponsive
         // (and it keeps working if the browser refuses the pointer lock).
         this.lock();
-        if (e.button === 0) this.mouseFiring = this.firePulse = true;
+        if (e.button === 0) {
+          this.mouseFiring = true;
+          this.firePulseUntil = performance.now() + 150;
+        }
         if (e.button === 2) this.mouseScoping = true;
         return;
       }
-      if (e.button === 0) this.mouseFiring = this.firePulse = true;
+      if (e.button === 0) {
+        this.mouseFiring = true;
+        this.firePulseUntil = performance.now() + 150;
+      }
       if (e.button === 2) this.mouseScoping = true;
       if (e.button === 1) {
         e.preventDefault();
@@ -210,8 +216,12 @@ export class Input {
     this.pressed.add(code);
   }
 
+  /** Called once a shot has actually been fired, so one click means one shot. */
+  clearFirePulse() {
+    this.firePulseUntil = 0;
+  }
+
   endFrame() {
-    this.firePulse = false;
     this.pressed.clear();
     this.dragX = 0;
     this.dragY = 0;

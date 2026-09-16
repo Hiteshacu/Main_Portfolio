@@ -22,6 +22,11 @@ export class MapView {
   private tx = 0;
   private ty = 0;
   private enemyDots: HTMLElement[] = [];
+  /** Renders a fresh, full-resolution image of one patch of the world (see Experience.bakeMap). */
+  private detailProvider: ((centerX: number, centerZ: number, half: number) => HTMLCanvasElement | null) | null = null;
+  private detailLayer: HTMLElement | null = null;
+  private detailTimer = 0;
+  private detailKey = '';
 
   constructor(terrain: Terrain, miniCanvas: HTMLCanvasElement) {
     this.image = MapView.preview(terrain);
@@ -89,6 +94,47 @@ export class MapView {
 
   setDiscovered(set: Set<ZoneId>) {
     this.discovered = set;
+  }
+
+  /** Zooming in re-renders the visible patch instead of magnifying the baked image. */
+  setDetailProvider(fn: (centerX: number, centerZ: number, half: number) => HTMLCanvasElement | null) {
+    this.detailProvider = fn;
+  }
+
+  private scheduleDetail() {
+    if (!this.detailProvider || !this.viewport || !this.detailLayer) return;
+    window.clearTimeout(this.detailTimer);
+    if (this.zoom < 1.35) {
+      this.detailLayer.innerHTML = '';
+      this.detailKey = '';
+      return;
+    }
+    // Wait until the gesture settles — one render per view, not one per wheel tick.
+    this.detailTimer = window.setTimeout(() => this.renderDetail(), 220);
+  }
+
+  private renderDetail() {
+    if (!this.detailProvider || !this.viewport || !this.detailLayer) return;
+    const size = this.viewport.clientWidth || 1;
+    // Visible rect in map space (0..1), then in world metres.
+    const u0 = -this.tx / (size * this.zoom), v0 = -this.ty / (size * this.zoom);
+    const span = 1 / this.zoom;
+    const cx = (u0 + span / 2) * WORLD_SIZE - WORLD_SIZE / 2;
+    const cz = (v0 + span / 2) * WORLD_SIZE - WORLD_SIZE / 2;
+    const half = (span * WORLD_SIZE) / 2;
+    const key = `${cx.toFixed(1)}|${cz.toFixed(1)}|${half.toFixed(1)}`;
+    if (key === this.detailKey) return;
+    const canvas = this.detailProvider(cx, cz, half);
+    if (!canvas) return;
+    this.detailKey = key;
+    canvas.className = 'bigmap-detail';
+    // Place it over exactly the world rect it was rendered from.
+    canvas.style.left = `${(u0 + 0) * 100}%`;
+    canvas.style.top = `${(v0 + 0) * 100}%`;
+    canvas.style.width = `${span * 100}%`;
+    canvas.style.height = `${span * 100}%`;
+    this.detailLayer.innerHTML = '';
+    this.detailLayer.appendChild(canvas);
   }
 
   drawMini(px: number, pz: number, facing: number, cameraYaw: number, enemies: { x: number; z: number }[] = []) {
@@ -222,6 +268,11 @@ export class MapView {
     img.className = 'bigmap-image';
     const pct = (v: number) => `${((v + WORLD_SIZE / 2) / WORLD_SIZE) * 100}%`;
     layer.appendChild(img);
+
+    // Sharp re-render of the zoomed-in patch sits directly on top of the baked image.
+    this.detailLayer = document.createElement('div');
+    this.detailLayer.className = 'bigmap-detail-layer';
+    layer.appendChild(this.detailLayer);
 
     // Explorable boundary ring
     const ring = document.createElement('div');
@@ -364,6 +415,7 @@ export class MapView {
     this.tx = Math.min(0, Math.max(-max, this.tx));
     this.ty = Math.min(0, Math.max(-max, this.ty));
     this.layer.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.zoom})`;
+    this.scheduleDetail();
     this.layer.style.setProperty('--inv', `${1 / this.zoom}`);
     this.viewport.classList.toggle('zoomed', this.zoom > 1.01);
     if (this.scaleBar) {

@@ -333,10 +333,14 @@ export class Experience {
       this.camera.lookAt(firstEnemy.position.x, firstEnemy.position.y + 1.2, firstEnemy.position.z);
       this.camera.updateMatrixWorld();
       await nextFrame();
+      const prevTarget = this.renderer.getRenderTarget();
       try {
-        this.composer.render(0.016);
+        this.renderer.setRenderTarget(this.composer.inputBuffer);
+        this.renderer.render(this.scene, this.camera);
       } catch {
         /* warm-up frame only */
+      } finally {
+        this.renderer.setRenderTarget(prevTarget);
       }
       this.camera.position.copy(camPos);
       this.camera.quaternion.copy(camQuat);
@@ -451,13 +455,17 @@ export class Experience {
    * Renders the actual 3D world straight down with an orthographic camera (trees, shadows, water,
    * buildings, hills) and tone-maps it into a canvas — a real "satellite" image for the maps.
    */
-  private bakeMap(size: number) {
-    const half = WORLD_SIZE / 2;
+  /**
+   * Renders a square patch of the world from straight above. `half` is the patch radius in metres
+   * (the whole map by default) and `size` the pixel resolution of the result.
+   */
+  bakeMap(size: number, centerX = 0, centerZ = 0, half = WORLD_SIZE / 2) {
     const cam = new THREE.OrthographicCamera(-half, half, half, -half, 1, 1200);
-    cam.position.set(0, 500, 0);
+    cam.position.set(centerX, 500, centerZ);
     cam.up.set(0, 0, -1);
-    cam.lookAt(0, 0, 0);
+    cam.lookAt(centerX, 0, centerZ);
     cam.updateMatrixWorld();
+    const detail = half < WORLD_SIZE / 2 - 0.5;
 
     // Half float keeps the highlights without needing EXT_float_blend (which some GPUs lack).
     const halfOk = this.renderer.extensions.has('EXT_color_buffer_half_float') || this.renderer.extensions.has('EXT_color_buffer_float');
@@ -471,13 +479,26 @@ export class Experience {
     this.env.fog.density = 0;
     this.vegetation.uniforms.uOcclude.value = 0;
     const sun = this.env.sun;
+    const hemi = this.env.hemi;
     const sc = sun.shadow.camera;
-    const saved = { l: sc.left, r: sc.right, t: sc.top, b: sc.bottom, n: sc.near, f: sc.far, pos: sun.position.clone(), target: sun.target.position.clone() };
-    Object.assign(sc, { left: -190, right: 190, top: 190, bottom: -190, near: 1, far: 1000 });
+    const saved = {
+      l: sc.left, r: sc.right, t: sc.top, b: sc.bottom, n: sc.near, f: sc.far,
+      pos: sun.position.clone(), target: sun.target.position.clone(),
+      sunColor: sun.color.clone(), sunIntensity: sun.intensity,
+      hemiIntensity: hemi.intensity, hemiSky: hemi.color.clone(), hemiGround: hemi.groundColor.clone(),
+    };
+    const surveyDir = new THREE.Vector3(0.32, 0.93, 0.18).normalize();
+    sun.color.set('#fff4e6');
+    sun.intensity = 3.1;
+    hemi.intensity = 1.05;
+    hemi.color.set('#cfe2fb');
+    hemi.groundColor.set('#7d6b46');
+    const shadowHalf = Math.min(190, half * 1.45 + 20);
+    Object.assign(sc, { left: -shadowHalf, right: shadowHalf, top: shadowHalf, bottom: -shadowHalf, near: 1, far: 1000 });
     sc.updateProjectionMatrix();
-    sun.target.position.set(0, 0, 0);
+    sun.target.position.set(centerX, 0, centerZ);
     sun.target.updateMatrixWorld();
-    sun.position.copy(this.env.sunDir).multiplyScalar(420);
+    sun.position.set(centerX, 0, centerZ).addScaledVector(surveyDir, 420);
     sun.updateMatrixWorld();
 
     const prevTarget = this.renderer.getRenderTarget();
@@ -494,6 +515,11 @@ export class Experience {
       sun.position.copy(saved.pos);
       sun.target.position.copy(saved.target);
       sun.target.updateMatrixWorld();
+      sun.color.copy(saved.sunColor);
+      sun.intensity = saved.sunIntensity;
+      hemi.intensity = saved.hemiIntensity;
+      hemi.color.copy(saved.hemiSky);
+      hemi.groundColor.copy(saved.hemiGround);
     }
 
     const pixels = halfOk ? new Uint16Array(size * size * 4) : new Uint8Array(size * size * 4);
@@ -515,6 +541,7 @@ export class Experience {
     const img = ctx.createImageData(size, size);
     const out = img.data;
     const value = halfLUT ? (v: number) => halfLUT![v] : (v: number) => v / 255;
+    const contourStep = detail ? 1.5 : 3;
     // sRGB encode through a lookup table — a Math.pow per channel per pixel is the slowest part here.
     const LUT = new Uint8Array(1025);
     for (let i = 0; i <= 1024; i++) {
@@ -524,11 +551,11 @@ export class Experience {
     const toSRGB = (c: number) => LUT[(c * 1024) | 0];
     const fit = (v: number) => (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.432951) + 0.238081);
     const terrain = this.terrain;
-    const step = WORLD_SIZE / size;
+    const step = (half * 2) / size;
     for (let py = 0; py < size; py++) {
       // WebGL rows start at the bottom; the map's +z points down.
       const src = (size - 1 - py) * size;
-      const z = (py + 0.5) * step - half;
+      const z = centerZ + (py + 0.5) * step - half;
       for (let px = 0; px < size; px++) {
         const i = (src + px) * 4, o = (py * size + px) * 4;
         // three.js ACES filmic (same curve as the post-processing tone mapping)
@@ -540,16 +567,16 @@ export class Experience {
         let cg = Math.min(1, Math.max(0, -0.10208 * ir + 1.10813 * ig - 0.00605 * ib));
         let cb = Math.min(1, Math.max(0, -0.00327 * ir - 0.07276 * ig + 1.07602 * ib));
         // Topographic contour lines on the hills (every 3 m), fading out beyond the explorable valley.
-        const x = (px + 0.5) * step - half;
+        const x = centerX + (px + 0.5) * step - half;
         const h = terrain.heightAt(x, z);
         if (h > 1.2) {
-          const band = Math.floor(h / 3);
-          if (band !== Math.floor(terrain.heightAt(x + step, z) / 3) || band !== Math.floor(terrain.heightAt(x, z + step) / 3)) {
+          const band = Math.floor(h / contourStep);
+          if (band !== Math.floor(terrain.heightAt(x + step, z) / contourStep) || band !== Math.floor(terrain.heightAt(x, z + step) / contourStep)) {
             const k = band % 5 === 0 ? 0.72 : 0.85;
             cr *= k; cg *= k; cb *= k;
           }
         }
-        const rim = Math.min(1, Math.max(0, (Math.hypot(x, z) - PLAY_RADIUS) / 30));
+        const rim = detail ? 0 : Math.min(1, Math.max(0, (Math.hypot(x, z) - PLAY_RADIUS) / 30));
         const dim = 1 - rim * 0.35;
         out[o] = toSRGB(cr) * dim;
         out[o + 1] = toSRGB(cg) * dim;
@@ -559,6 +586,17 @@ export class Experience {
     }
     ctx.putImageData(img, 0, 0);
     return canvas;
+  }
+
+  /** Full-resolution render of one patch of the world, for the zoomed travel map. */
+  mapDetail(centerX: number, centerZ: number, half: number) {
+    if (this.stopped || this.renderer.getContext().isContextLost()) return null;
+    try {
+      return this.bakeMap(this.quality === 'low' ? 768 : 1024, centerX, centerZ, half);
+    } catch (err) {
+      console.warn('Map detail render skipped', err);
+      return null;
+    }
   }
 
   /** Re-renders the sky into an environment map and applies it to every PBR (glTF) material. */
@@ -864,6 +902,7 @@ export class Experience {
         if (yaw !== null) {
           this.aimHold = 0.45;
           this.rig.kick(scoped ? 0.007 : 0.016);
+          this.input.clearFirePulse();
         }
       }
       if (this.input.consume('KeyR') || this.input.consume('TouchReload')) combat.reload();
